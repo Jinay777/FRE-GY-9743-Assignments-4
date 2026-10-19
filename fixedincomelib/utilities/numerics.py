@@ -107,22 +107,42 @@ class Interpolator1DPCP(Interpolator1D):
                          extrapolation_method)
         assert self.extrap_method_ == ExtrapMethod.FLAT
 
+    def _bucket_index(self, x: float) -> int:
+        # I find the first knot with axis1[i] >= x, so x in (x_{i-1}, x_i] maps to i.
+        # A point sitting exactly on a knot takes that knot's value: left continuity.
+        idx = int(np.searchsorted(self.axis1_, x, side='left'))
+        # Past the last knot I hold the last value (flat right wing).
+        # The flat left wing already falls out since searchsorted returns 0 there.
+        return min(idx, self.length_ - 1)
+
+    def _bucket_weights(self, start_x: float, end_x: float) -> np.ndarray:
+        # I treat bucket i as the interval (e_i, e_{i+1}] with edges
+        # [-inf, x_0, x_1, ..., x_{N-2}, +inf], so both flat wings are just
+        # the first and last buckets extended to infinity.
+        edges = np.concatenate(([-np.inf], np.asarray(self.axis1_[:-1], dtype=float), [np.inf]))
+        lo, hi = min(start_x, end_x), max(start_x, end_x)
+        # I take the overlap length of [lo, hi] with each bucket, floored at zero.
+        w = np.clip(np.minimum(hi, edges[1:]) - np.maximum(lo, edges[:-1]), 0.0, None)
+        # I flip the sign if the limits come in reversed, matching the usual integral convention.
+        return w if end_x >= start_x else -w
+
     def interpolate(self, x: float) -> float:
-        #TODO
-        pass
+        # I cast to float because the factory keeps integer inputs as an int array.
+        return float(self.values_[self._bucket_index(x)])
 
     def integrate(self, start_x: float, end_x: float) -> float:
-        #TODO
-        pass
+        # The integral is each ordinate times the length of its bucket inside [start_x, end_x].
+        return float(np.dot(self._bucket_weights(start_x, end_x), self.values_))
 
     def gradient_wrt_ordinate(self, x: float) -> np.ndarray:
-        #TODO
-        pass
+        # f(x) picks out exactly one ordinate, so its gradient is one-hot.
+        grad = np.zeros(self.length_)
+        grad[self._bucket_index(x)] = 1.0
+        return grad
 
     def gradient_of_integrated_value_wrt_ordinate(self, start_x: float, end_x: float) -> np.ndarray:
-        #TODO
-        pass
-
+        # The integral is linear in the ordinates, so its gradient is exactly the bucket weights.
+        return self._bucket_weights(start_x, end_x)
 
 
 class InterpolatorFactory:
